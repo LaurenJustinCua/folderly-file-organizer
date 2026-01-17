@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Folderly</title>
+
+<style>
+*{box-sizing:border-box;font-family:Inter,Arial,sans-serif}
+body{margin:0;background:radial-gradient(circle at top,#1a1c22,#0b0d12);color:#e5e7eb}
+header{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;background:rgba(15,17,23,.8);border-bottom:1px solid #1f2937}
+.search{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:10px 14px;color:#d1d5db}
+.container{display:flex;height:calc(100vh - 64px)}
+.sidebar{width:260px;padding:16px;background:#0b0d12;border-right:1px solid #1f2937}
+.nav-item{padding:10px 12px;border-radius:10px;cursor:pointer;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between}
+.nav-item:hover,.nav-item.active{background:#1f2937}
+.main{flex:1;padding:24px;overflow:auto}
+.toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.file-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:20px}
+.file-card{background:linear-gradient(180deg,#141720,#0f1117);border:1px solid #1f2937;border-radius:16px;padding:16px;height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:.2s;user-select:none}
+.file-card:hover{border-color:#6366f1;transform:translateY(-2px)}
+.new-folder-btn{width:100%;margin-top:10px;padding:10px;background:linear-gradient(135deg,#6d5dfc,#4338ca);border:none;border-radius:10px;color:white;font-weight:500}
+footer{height:60px;border-top:1px solid #1f2937;display:flex;align-items:center;justify-content:center;color:#9ca3af}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);align-items:center;justify-content:center;z-index:2000}
+.modal-box{width:360px;background:#141720;border-radius:18px;padding:26px;border:1px solid #1f2937}
+button{cursor:pointer}
+
+/* AUTH */
+.auth-btn{padding:8px 14px;border-radius:10px;border:1px solid #1f2937;background:#111827;color:#e5e7eb}
+.auth-btn.primary{background:linear-gradient(135deg,#6366f1,#4f46e5);border:none}
+
+/* RIGHT CLICK MENU */
+.context-menu{
+  position:fixed;
+  background:#0f1117;
+  border:1px solid #1f2937;
+  border-radius:12px;
+  padding:6px;
+  display:none;
+  z-index:3000;
+  width:160px;
+}
+.context-menu div{
+  padding:10px;
+  border-radius:8px;
+  cursor:pointer;
+}
+.context-menu div:hover{
+  background:#1f2937;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div style="font-weight:700;font-size:22px">FOLDERLY</div>
+  <input class="search" placeholder="Search" style="width:360px">
+  <div id="authButtons" style="display:flex;gap:10px"></div>
+</header>
+
+<div class="container">
+<aside class="sidebar">
+  <div class="nav-item active" onclick="openDrive()">📂 My Drive</div>
+  <div class="nav-item" onclick="openTrash()">🗑 Trash</div>
+  <div class="nav-item" onclick="openAccount()">👤 Account</div>
+
+  <div style="margin:20px 0 10px;font-size:13px;color:#9ca3af">FOLDERS</div>
+  <div id="folderList"></div>
+  <button class="new-folder-btn" onclick="openFolderModal()">＋ New Folder</button>
+</aside>
+
+<main class="main">
+  <div class="toolbar">
+    <h2 id="pageTitle">My Drive</h2>
+    <button onclick="fileInput.click()" class="auth-btn primary">Upload</button>
+  </div>
+
+  <div id="fileGrid" class="file-grid"></div>
+  <input type="file" id="fileInput" hidden multiple>
+</main>
+</div>
+
+<footer>Folderly ©</footer>
+
+<!-- CONTEXT MENU -->
+<div id="contextMenu" class="context-menu">
+  <div onclick="moveFile()">📂 Move</div>
+  <div onclick="deleteFile()">🗑 Delete</div>
+</div>
+
+<!-- FOLDER MODAL -->
+<div id="folderModal" class="modal">
+  <div class="modal-box">
+    <h3>Create Folder</h3>
+    <input id="folderName" class="search" placeholder="Folder name" style="width:100%;margin:16px 0">
+    <button onclick="createFolder()" class="new-folder-btn">Create</button>
+  </div>
+</div>
+
+<!-- ACCOUNT -->
+<div id="accountPage" class="modal">
+  <div class="modal-box">
+    <h3>Account Settings</h3>
+    <p id="accountEmail"></p>
+    <button onclick="logout()" class="new-folder-btn">Log out</button>
+    <button onclick="closeAccount()" style="margin-top:10px;width:100%">Close</button>
+  </div>
+</div>
+
+<!-- AUTH MODAL -->
+<div id="authModal" class="modal">
+  <div class="modal-box">
+    <h3 id="authTitle">Sign In</h3>
+
+    <input id="authEmail" class="search" placeholder="Email"
+      style="width:100%;margin:12px 0">
+
+    <input id="authPassword" type="password" class="search" placeholder="Password"
+      style="width:100%;margin-bottom:16px">
+
+    <button onclick="submitAuth()" class="new-folder-btn" id="authActionBtn">
+      Sign In
+    </button>
+
+    <button onclick="closeAuth()" style="margin-top:10px;width:100%">
+      Cancel
+    </button>
+  </div>
+</div>
+
+<script>
+// API Configuration
+const API_BASE_URL = 'http://localhost:3000/api';
+let token = localStorage.getItem('token') || null;
+let currentUser = null;
+
+// Application State
+let folders = [];
+let files = [];
+let currentFolderId = null;
+let view = "drive";
+let selectedFileId = null;
+
+// DOM Elements
+const folderList = document.getElementById("folderList");
+const fileGrid = document.getElementById("fileGrid");
+const fileInput = document.getElementById("fileInput");
+const folderModal = document.getElementById("folderModal");
+const folderName = document.getElementById("folderName");
+const pageTitle = document.getElementById("pageTitle");
+const contextMenu = document.getElementById("contextMenu");
+const authButtons = document.getElementById("authButtons");
+const accountPage = document.getElementById("accountPage");
+const accountEmail = document.getElementById("accountEmail");
+const searchInput = document.querySelector('.search');
+
+// API Helper Functions
+async function apiCall(endpoint, options = {}) {
+  const url = `${API_BASE_URL}${endpoint}`;
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Request failed');
+    }
+
+    return data;
+  } catch (error) {
+    console.error('API Error:', error);
+    alert(error.message || 'Something went wrong');
+    throw error;
+  }
+}
+
+// Load folders from backend
+async function loadFolders() {
+  if (!token) return;
+  
+  try {
+    folders = await apiCall('/folders');
+    renderFolders();
+  } catch (error) {
+    console.error('Failed to load folders:', error);
+  }
+}
+
+// Load files from backend
+async function loadFiles() {
+  if (!token) return;
+
+  try {
+    const isTrashed = view === "trash";
+    const endpoint = `/files?is_trashed=${isTrashed}${currentFolderId ? `&folder_id=${currentFolderId}` : ''}`;
+    files = await apiCall(endpoint);
+    renderFiles();
+  } catch (error) {
+    console.error('Failed to load files:', error);
+  }
+}
+
+// Render folders
+function renderFolders() {
+  folderList.innerHTML = "";
+  
+  folders.forEach(folder => {
+    const d = document.createElement("div");
+    d.className = "nav-item" + (folder.id === currentFolderId ? " active" : "");
+    d.innerHTML = `<span onclick="openFolderPage(${folder.id}, '${folder.name}')">📁 ${folder.name}</span>`;
+    folderList.appendChild(d);
+  });
+}
+
+// Open folder page
+async function openFolderPage(folderId, folderName) {
+  currentFolderId = folderId;
+  pageTitle.innerText = folderName;
+  renderFolders();
+  await loadFiles();
+}
+
+// Render files
+function renderFiles() {
+  fileGrid.innerHTML = "";
+  
+  if (files.length === 0) {
+    fileGrid.innerHTML = "<div style='opacity:.6'>No files here</div>";
+    return;
+  }
+
+  files.forEach((file) => {
+    const card = document.createElement("div");
+    card.className = "file-card";
+    card.innerHTML = `<div style="font-size:36px">📄</div><div style="text-align:center;word-break:break-word">${file.original_name}</div>`;
+    card.oncontextmenu = (e) => {
+      e.preventDefault();
+      selectedFileId = file.id;
+      contextMenu.style.left = e.pageX + "px";
+      contextMenu.style.top = e.pageY + "px";
+      contextMenu.style.display = "block";
+    };
+    fileGrid.appendChild(card);
+  });
+}
+
+// Close context menu on click
+document.onclick = () => contextMenu.style.display = "none";
+
+// Delete file (move to trash)
+async function deleteFile() {
+  if (!selectedFileId) return;
+
+  try {
+    await apiCall(`/files/${selectedFileId}`, { method: 'DELETE' });
+    contextMenu.style.display = "none";
+    await loadFiles();
+  } catch (error) {
+    console.error('Failed to delete file:', error);
+  }
+}
+
+// Move file to folder
+async function moveFile() {
+  if (!selectedFileId) return;
+
+  const folderNames = folders.map(f => f.name).join(', ');
+  const targetName = prompt(`Move to which folder?\nAvailable: ${folderNames}`);
+  
+  if (!targetName) return;
+
+  const targetFolder = folders.find(f => f.name === targetName);
+  if (!targetFolder) {
+    alert('Folder not found');
+    return;
+  }
+
+  try {
+    await apiCall(`/files/${selectedFileId}/move`, {
+      method: 'PATCH',
+      body: JSON.stringify({ folder_id: targetFolder.id })
+    });
+    contextMenu.style.display = "none";
+    await loadFiles();
+  } catch (error) {
+    console.error('Failed to move file:', error);
+  }
+}
+
+// Handle file upload
+fileInput.onchange = async () => {
+  if (!token) {
+    alert('Please sign in to upload files');
+    return;
+  }
+
+  for (let file of fileInput.files) {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (currentFolderId) {
+      formData.append('folder_id', currentFolderId);
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/files/upload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Upload failed');
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert(`Failed to upload ${file.name}: ${error.message}`);
+    }
+  }
+
+  fileInput.value = '';
+  await loadFiles();
+};
+
+// Folder modal functions
+function openFolderModal() {
+  if (!token) {
+    alert('Please sign in to create folders');
+    return;
+  }
+  folderModal.style.display = "flex";
+}
+
+async function createFolder() {
+  const name = folderName.value.trim();
+  if (!name) {
+    alert('Please enter a folder name');
+    return;
+  }
+
+  try {
+    await apiCall('/folders', {
+      method: 'POST',
+      body: JSON.stringify({ name })
+    });
+    folderName.value = "";
+    folderModal.style.display = "none";
+    await loadFolders();
+  } catch (error) {
+    console.error('Failed to create folder:', error);
+  }
+}
+
+// Navigation functions
+async function openDrive() {
+  view = "drive";
+  currentFolderId = null;
+  pageTitle.innerText = "My Drive";
+  await loadFiles();
+}
+
+async function openTrash() {
+  view = "trash";
+  currentFolderId = null;
+  pageTitle.innerText = "Trash";
+  await loadFiles();
+}
+
+// Account functions
+function openAccount() {
+  accountPage.style.display = "flex";
+  accountEmail.innerText = currentUser?.email || "Guest";
+}
+
+function closeAccount() {
+  accountPage.style.display = "none";
+}
+
+async function logout() {
+  token = null;
+  currentUser = null;
+  localStorage.removeItem('token');
+  folders = [];
+  files = [];
+  currentFolderId = null;
+  updateAuthUI();
+  location.reload();
+}
+
+// Search functionality
+let searchTimeout;
+searchInput.addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  const query = e.target.value.trim();
+  
+  if (!query) {
+    loadFiles();
+    return;
+  }
+
+  searchTimeout = setTimeout(async () => {
+    if (!token) return;
+    
+    try {
+      files = await apiCall(`/files/search?q=${encodeURIComponent(query)}`);
+      renderFiles();
+    } catch (error) {
+      console.error('Search error:', error);
+    }
+  }, 500);
+});
+
+// Update auth UI
+function updateAuthUI() {
+  authButtons.innerHTML = currentUser
+    ? `<div style="display:flex;gap:10px;align-items:center">
+         <span>${currentUser.email}</span>
+         <div onclick="openAccount()" style="cursor:pointer">👤</div>
+       </div>`
+    : `<button class="auth-btn" onclick="openAuth('signin')">Sign In</button>
+       <button class="auth-btn primary" onclick="openAuth('signup')">Sign Up</button>`;
+}
+
+const authModal = document.getElementById("authModal");
+const authTitle = document.getElementById("authTitle");
+const authActionBtn = document.getElementById("authActionBtn");
+const authEmail = document.getElementById("authEmail");
+const authPassword = document.getElementById("authPassword");
+
+let authMode = "signin";
+
+function openAuth(mode) {
+  authMode = mode;
+  authModal.style.display = "flex";
+  authTitle.innerText = mode === "signin" ? "Sign In" : "Sign Up";
+  authActionBtn.innerText = mode === "signin" ? "Sign In" : "Create Account";
+}
+
+function closeAuth() {
+  authModal.style.display = "none";
+  authEmail.value = "";
+  authPassword.value = "";
+}
+
+// Submit authentication
+async function submitAuth() {
+  const email = authEmail.value.trim();
+  const password = authPassword.value.trim();
+
+  if (!email || !password) {
+    alert("Please fill all fields");
+    return;
+  }
+
+  try {
+    const endpoint = authMode === "signin" ? "/auth/signin" : "/auth/signup";
+    const data = await apiCall(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ email, password })
+    });
+
+    token = data.token;
+    currentUser = data.user;
+    localStorage.setItem('token', token);
+
+    closeAuth();
+    updateAuthUI();
+    
+    // Load user data
+    await loadFolders();
+    await loadFiles();
+  } catch (error) {
+    console.error('Auth error:', error);
+  }
+}
+
+// Initialize app
+async function init() {
+  updateAuthUI();
+  
+  if (token) {
+    // Try to load user data
+    try {
+      await loadFolders();
+      await loadFiles();
+    } catch (error) {
+      // Token might be invalid, clear it
+      token = null;
+      localStorage.removeItem('token');
+      updateAuthUI();
+    }
+  }
+}
+
+// Start the app
+init();
+
+</script>
+
+</body>
+</html>
